@@ -8,6 +8,7 @@ create table public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   name text,
   email text,
+  is_admin boolean not null default false,
   created_at timestamptz default now()
 );
 
@@ -87,6 +88,7 @@ create table public.family_memories (
 create table public.moderation_logs (
   id uuid primary key default gen_random_uuid(),
   child_id uuid references public.children(id) on delete cascade,
+  target text not null default 'output', -- 'input' (a free-text field) or 'output' (the generated story)
   flagged boolean not null,
   categories jsonb,
   created_at timestamptz default now()

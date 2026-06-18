@@ -3,7 +3,15 @@ import OpenAI from "openai";
 // To switch to Gemini: replace this client and the call below.
 // Nothing outside this file needs to change — every route imports
 // generateStory(), not OpenAI directly.
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+// Lazy-instantiated so importing this module (e.g. in unit tests, or
+// during `next build`) doesn't require OPENAI_API_KEY to already be set.
+let _openai: OpenAI | null = null;
+function getOpenAiClient() {
+  if (!_openai) {
+    _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  }
+  return _openai;
+}
 
 const SAFETY_SYSTEM_PROMPT = `You write short bedtime stories for young children, ages 2 to 10.
 
@@ -31,8 +39,10 @@ exactly as the hard rules above describe.`;
 // Basic defense against a parent's free-text field (favorite animal, a
 // custom character description, a family memory note) being used to try
 // to steer the model off its safety rules. This is a simple mitigation,
-// not a complete prompt-injection defense — see README backlog notes.
-function sanitizeInput(value: string | null | undefined, maxLength = 120) {
+// not a complete prompt-injection defense — see README backlog. It's
+// paired with a real moderation pass on these same inputs in
+// lib/storyWorkflow.ts, which is the more meaningful defense layer.
+export function sanitizeInput(value: string | null | undefined, maxLength = 120) {
   if (!value) return "";
   return value
     .replace(/[\r\n]+/g, " ")
@@ -99,7 +109,7 @@ no markdown, no code fences:
   "coloringPrompt": "string — one sentence describing a simple coloring-page scene based on tonight's story"
 }`;
 
-  const completion = await openai.chat.completions.create({
+  const completion = await getOpenAiClient().chat.completions.create({
     model: "gpt-4o-mini",
     messages: [
       { role: "system", content: SAFETY_SYSTEM_PROMPT },
@@ -128,11 +138,12 @@ no markdown, no code fences:
   };
 }
 
-// Returns both the moderation result and whether the story is safe to send.
-// Callers are responsible for logging this to moderation_logs and routing
-// flagged content to flagged_stories instead of sending it.
-export async function moderateStory(story: string) {
-  const moderation = await openai.moderations.create({ input: story });
+// Runs OpenAI's moderation endpoint on any piece of text — the generated
+// story, or a single free-text input field. Callers decide what to do
+// with a flagged result; this function just reports it.
+export async function moderateText(text: string) {
+  if (!text) return { flagged: false, categories: {} };
+  const moderation = await getOpenAiClient().moderations.create({ input: text });
   const result = moderation.results[0];
   return { flagged: !!result?.flagged, categories: result?.categories || {} };
 }

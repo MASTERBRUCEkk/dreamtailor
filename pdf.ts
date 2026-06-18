@@ -1,6 +1,6 @@
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
-function wrapText(text: string, maxCharsPerLine: number): string[] {
+export function wrapText(text: string, maxCharsPerLine: number): string[] {
   const words = text.split(/\s+/);
   const lines: string[] = [];
   let current = "";

@@ -1,5 +1,5 @@
 import { createServiceClient } from "@/lib/supabase/server";
-import { generateStory, moderateStory } from "@/lib/openai";
+import { generateStory, moderateText } from "@/lib/openai";
 import { sendStoryEmail } from "@/lib/resend";
 import { generateAndUploadAudio } from "@/lib/tts";
 import { getPlanLimits } from "@/lib/plans";
@@ -63,6 +63,33 @@ export async function runStoryWorkflow(input: {
     .limit(1)
     .maybeSingle();
 
+  // Input moderation: check every free-text field a parent typed in
+  // *before* it ever reaches the prompt, not just the story afterward.
+  const inputsToCheck: Array<{ label: string; text: string | undefined | null }> = [
+    { label: "favorite animal", text: child.favorite_animal },
+    { label: "custom character", text: child.custom_character?.description },
+    { label: "family memory note", text: pendingMemory?.note },
+    { label: "lesson topic", text: input.lessonTopic },
+  ];
+
+  for (const field of inputsToCheck) {
+    if (!field.text) continue;
+    const fieldModeration = await moderateText(field.text);
+    await supabase.from("moderation_logs").insert({
+      child_id: child.id,
+      target: "input",
+      flagged: fieldModeration.flagged,
+      categories: fieldModeration.categories,
+    });
+    if (fieldModeration.flagged) {
+      return {
+        ok: false,
+        reason: "flagged",
+        message: `The ${field.label} you entered couldn't be used — try rewording it.`,
+      };
+    }
+  }
+
   try {
     const result = await generateStory({
       childName: child.name,
@@ -76,9 +103,10 @@ export async function runStoryWorkflow(input: {
       lessonTopic: input.lessonTopic,
     });
 
-    const moderation = await moderateStory(result.story);
+    const moderation = await moderateText(result.story);
     await supabase.from("moderation_logs").insert({
       child_id: child.id,
+      target: "output",
       flagged: moderation.flagged,
       categories: moderation.categories,
     });
